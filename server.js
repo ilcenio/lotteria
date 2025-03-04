@@ -35,6 +35,7 @@ pool.query(`
 // Endpoint per verificare l'esito di un biglietto
 app.post("/verifica-biglietto", (req, res) => {
   const numeroBiglietto = parseInt(req.body.numero);
+console.log("Numero biglietto ricevuto:", req.body.numero);
   if (isNaN(numeroBiglietto) || numeroBiglietto < 1) {
     return res.status(400).send({ message: "Numero biglietto non valido" });
   }
@@ -42,8 +43,9 @@ app.post("/verifica-biglietto", (req, res) => {
   // Recupera il biglietto dal database
   pool.query("SELECT * FROM biglietti WHERE numero = $1", [numeroBiglietto], (err, result) => {
     if (err) {
-      return res.status(500).send({ message: "Errore nel server" });
-    }
+  console.error("Errore nel recupero del biglietto:", err);
+  return res.status(500).send({ message: "Errore nel server", error: err.message });
+}
     if (result.rows.length === 0) {
       return res.status(400).send({ message: "Biglietto non trovato" });
     }
