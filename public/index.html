@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verifica Biglietto Lotteria</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f7f7f7; }
+        .container { max-width: 500px; margin: auto; background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; }
+        input, button { width: 100%; padding: 10px; margin: 10px 0; }
+        .result { font-size: 18px; font-weight: bold; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Verifica il tuo biglietto</h1>
+        <input type="number" id="numeroBiglietto" placeholder="Inserisci il numero del biglietto">
+        <button onclick="verificaBiglietto()">Verifica</button>
+        <div class="result" id="result"></div>
+    </div>
+
+    <script>
+        function verificaBiglietto() {
+            const numero = document.getElementById("numeroBiglietto").value;
+            if (!numero) {
+                alert("Per favore, inserisci il numero del biglietto.");
+                return;
+            }
+            fetch("http://localhost:3000/verifica-biglietto", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ numero: parseInt(numero) })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("result").innerText = data.message;
+            })
+            .catch(error => {
+                console.error("Errore:", error);
+                document.getElementById("result").innerText = "Si è verificato un errore.";
+            });
+        }
+    </script>
+</body>
+</html>
