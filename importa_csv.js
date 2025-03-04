@@ -1,23 +1,24 @@
 const fs = require("fs");
 const csv = require("csv-parser");
-const sqlite3 = require("sqlite3").verbose();
+const { Pool } = require("pg");
 
-// Apri il database
-const db = new sqlite3.Database("./lotteria.db");
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
-// Leggi il file CSV e inserisci i dati
 fs.createReadStream("biglietti.csv")
-  .pipe(csv({ separator: ';' })) // Specifica il separatore come punto e virgola
+  .pipe(csv({ separator: ';' }))
   .on("data", (data) => {
-      // Assumiamo che il CSV abbia colonne "numero", "nome", "cognome"
-      db.run("INSERT OR IGNORE INTO biglietti (numero, nome, cognome) VALUES (?, ?, ?)",
-        [parseInt(data.numero), data.nome, data.cognome],
-        (err) => {
-          if(err) console.error("Errore inserimento biglietto:", err);
-        }
-      );
+    pool.query(
+      "INSERT INTO biglietti (numero, nome, cognome) VALUES ($1, $2, $3) ON CONFLICT (numero) DO NOTHING",
+      [parseInt(data.numero), data.nome, data.cognome],
+      (err) => {
+        if (err) console.error("Errore inserimento biglietto:", err);
+      }
+    );
   })
   .on("end", () => {
-      console.log("Importazione completata!");
-      db.close();
+    console.log("Importazione completata!");
+    pool.end();
   });

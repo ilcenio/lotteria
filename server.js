@@ -1,82 +1,94 @@
 const express = require("express");
-const sqlite3 = require("sqlite3").verbose();
 const cors = require("cors");
 const bodyParser = require("body-parser");
+const { Pool } = require("pg");
 
 const app = express();
-app.use(express.static('public'));
 app.use(cors());
 app.use(bodyParser.json());
 
-// Crea o apre il database "lotteria.db"
-const db = new sqlite3.Database("./lotteria.db");
+// Utilizza la porta fornita da Render o 3000 in locale
+const PORT = process.env.PORT || 3000;
+
+// Configurazione del pool PostgreSQL utilizzando la variabile DATABASE_URL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false } // Necessario per la connessione su Render
+});
 
 // Crea la tabella "biglietti" se non esiste già
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS biglietti (
+pool.query(`
+  CREATE TABLE IF NOT EXISTS biglietti (
     numero INTEGER PRIMARY KEY,
     nome TEXT,
     cognome TEXT,
     vincente INTEGER DEFAULT NULL
-  )`);
+  )
+`, (err) => {
+  if (err) {
+    console.error("Errore nella creazione della tabella:", err);
+  } else {
+    console.log("Tabella biglietti pronta.");
+  }
 });
 
-// Endpoint per verificare e salvare l'esito di un biglietto
+// Endpoint per verificare l'esito di un biglietto
 app.post("/verifica-biglietto", (req, res) => {
-    const numeroBiglietto = parseInt(req.body.numero);
+  const numeroBiglietto = parseInt(req.body.numero);
+  if (isNaN(numeroBiglietto) || numeroBiglietto < 1) {
+    return res.status(400).send({ message: "Numero biglietto non valido" });
+  }
 
-    // Verifica che il numero del biglietto sia valido
-    if (isNaN(numeroBiglietto) || numeroBiglietto < 1) {
-        return res.status(400).send({ message: "Numero biglietto non valido" });
+  // Recupera il biglietto dal database
+  pool.query("SELECT * FROM biglietti WHERE numero = $1", [numeroBiglietto], (err, result) => {
+    if (err) {
+      return res.status(500).send({ message: "Errore nel server" });
     }
-    
-    // Cerca il biglietto nel database
-    db.get("SELECT * FROM biglietti WHERE numero = ?", [numeroBiglietto], (err, row) => {
+    if (result.rows.length === 0) {
+      return res.status(400).send({ message: "Biglietto non trovato" });
+    }
+    const row = result.rows[0];
+
+    // Se l'esito è già stato calcolato, restituisci il risultato salvato
+    if (row.vincente !== null) {
+      return res.send({
+        numero: row.numero,
+        nome: row.nome,
+        cognome: row.cognome,
+        vincente: row.vincente === 1,
+        message: row.vincente === 1 ? "Il biglietto è vincente!" : "Il biglietto non è vincente."
+      });
+    }
+
+    // Calcola l'esito con probabilità del 10%
+    const isWinner = Math.random() < 0.1;
+    pool.query(
+      "UPDATE biglietti SET vincente = $1 WHERE numero = $2",
+      [isWinner ? 1 : 0, numeroBiglietto],
+      (err) => {
         if (err) {
-            return res.status(500).send({ message: "Errore nel server" });
+          return res.status(500).send({ message: "Errore durante l'aggiornamento del biglietto" });
         }
-        if (!row) {
-            return res.status(400).send({ message: "Biglietto non trovato" });
-        }
-        
-        // Se l'esito è già stato calcolato, lo restituisce
-        if (row.vincente !== null) {
-            return res.send({
-                numero: row.numero,
-                nome: row.nome,
-                cognome: row.cognome,
-                vincente: row.vincente === 1,
-                message: row.vincente === 1 ? "Il biglietto è vincente!" : "Il biglietto non è vincente."
-            });
-        }
-        
-        // Altrimenti, calcola l'esito con probabilità del 10%
-        const isWinner = Math.random() < 0.1;
-        
-        // Salva l'esito nel database
-        db.run("UPDATE biglietti SET vincente = ? WHERE numero = ?", [isWinner ? 1 : 0, numeroBiglietto], function(err) {
-            if (err) {
-                return res.status(500).send({ message: "Errore durante l'aggiornamento del biglietto" });
-            }
-            return res.send({
-                numero: row.numero,
-                nome: row.nome,
-                cognome: row.cognome,
-                vincente: isWinner,
-                message: isWinner ? "Complimenti, il biglietto è vincente!" : "Mi dispiace, il biglietto non è vincente."
-            });
+        return res.send({
+          numero: row.numero,
+          nome: row.nome,
+          cognome: row.cognome,
+          vincente: isWinner,
+          message: isWinner ? "Complimenti, il biglietto è vincente!" : "Mi dispiace, il biglietto non è vincente."
         });
-    });
+      }
+    );
+  });
 });
 
 // Endpoint per esportare i risultati in formato CSV
 app.get("/export-results", (req, res) => {
-  db.all("SELECT numero, nome, cognome, vincente FROM biglietti", (err, rows) => {
+  pool.query("SELECT numero, nome, cognome, vincente FROM biglietti", (err, result) => {
     if (err) {
       return res.status(500).send({ message: "Errore durante l'estrazione dei dati" });
     }
     let csv = "numero,nome,cognome,esito\n";
-    rows.forEach(row => {
+    result.rows.forEach(row => {
       let esito = "";
       if (row.vincente === 1) {
         esito = "vincente";
@@ -87,12 +99,15 @@ app.get("/export-results", (req, res) => {
       }
       csv += `${row.numero},${row.nome},${row.cognome},${esito}\n`;
     });
-    // Imposta gli header per indicare che si tratta di un file CSV in download
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", "attachment; filename=risultati.csv");
     res.send(csv);
   });
 });
 
-// Avvia il server sulla porta 3000
-app.listen(3000, () => console.log("Server in ascolto su http://localhost:3000"));
+// Serve file statici (la tua pagina index.html e asset) dalla cartella "public"
+app.use(express.static("public"));
+
+app.listen(PORT, () => {
+  console.log(`Server in ascolto sulla porta ${PORT}`);
+});
